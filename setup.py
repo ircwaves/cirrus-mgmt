@@ -44,8 +44,8 @@ setup(
         [cirrus.plugins]
         {NAME}=cirrus.plugins.management
         [cirrus.commands]
-        manage=cirrus.plugins.management.manage:manage
-        payload=cirrus.plugins.management.payload:payload
-        deployments=cirrus.plugins.management.deployments:deployments
+        manage=cirrus.plugins.management.commands.manage:manage
+        payload=cirrus.plugins.management.commands.payload:payload
+        deployments=cirrus.plugins.management.commands.deployments:deployments
     """,
 )
