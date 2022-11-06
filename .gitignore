@@ -1,0 +1,14 @@
+__pycache__/
+.python-version
+.pytest_cache/
+node_modules/
+.idea/
+.DS_Store
+.serverless
+.dist/
+dist/
+/build/
+.env
+packages/
+output/
+*.egg-info/
