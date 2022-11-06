@@ -6,7 +6,7 @@ from pathlib import Path
 
 from .utils.boto3 import get_mfa_session, validate_session
 
-DEFAULT_DEPLYOMENTS_DIR_NAME = "deployments"
+DEFAULT_DEPLOYMENTS_DIR_NAME = "deployments"
 
 
 def load_env_file(path: Path):
@@ -40,7 +40,7 @@ def write_env_file(path: Path, env):
 
 
 def deployments_dir_from_project(project):
-    _dir = project.dot_dir.joinpath(DEFAULT_DEPLYOMENTS_DIR_NAME)
+    _dir = project.dot_dir.joinpath(DEFAULT_DEPLOYMENTS_DIR_NAME)
     _dir.mkdir(exist_ok=True)
     return _dir
 
@@ -53,16 +53,16 @@ class Deployment:
     def __init__(
         self,
         path: Path,
-        meta: dict,
-        env: dict,
+        meta: dict = None,
     ):
         self.path = path
-        self.name = path.name
-        self.meta = meta
-        self.env = env
+        self.meta = meta if meta else json.loads(path.read_text())
 
-        self.stackname = meta["stackname"]
-        self.profile = meta["profile"]
+        self.name = self.meta["name"]
+        self.stackname = self.meta["stackname"]
+        self.profile = self.meta["profile"]
+        self.env = self.meta["environment"]
+        self.user_vars = self.meta.get("user_vars", {})
 
         self._session = None
 
@@ -71,39 +71,31 @@ class Deployment:
         if not stackname:
             stackname = project.config.get_stackname(name)
 
+        env = cls.get_env_from_lambda(stackname, cls._get_session(profile))
+
         now = now_isoformat()
         meta = {
+            "name": name,
             "created": now,
             "updated": now,
             "stackname": stackname,
             "profile": profile,
+            "environment": env,
         }
 
         path = cls.get_path_from_project(project, name)
-        env = cls.get_env_from_lambda(stackname, cls._get_session(profile))
-        self = cls(path, meta, env)
-        self._persist()
+        self = cls(path, meta)
+        self.save()
 
         return self
 
     @classmethod
-    def from_dir(cls, name: str, project):
-        path = cls.get_path_from_project(project, name)
-
-        return cls(
-            path,
-            json.loads(path.joinpath(f"{name}.json").read_text()),
-            load_env_file(path.joinpath("env")),
-        )
+    def from_name(cls, name: str, project):
+        return cls(cls.get_path_from_project(project, name))
 
     @classmethod
-    def remove(cls, project, name: str):
-        import shutil
-
-        shutil.rmtree(
-            cls.get_path_from_project(project, name),
-            ignore_errors=True,
-        )
+    def remove(cls, name: str, project):
+        cls.get_path_from_project(project, name).unlink(missing_ok=True)
 
     @staticmethod
     def yield_deployment_dirs(project):
@@ -113,7 +105,7 @@ class Deployment:
 
     @staticmethod
     def get_path_from_project(project, name: str):
-        return deployments_dir_from_project(project).joinpath(name)
+        return deployments_dir_from_project(project).joinpath(f"{name}.json")
 
     @staticmethod
     def _get_session(profile: str = None):
@@ -147,14 +139,43 @@ class Deployment:
         self.profile = profile if profile else self.profile
         self.env = self.get_env_from_lambda(self.stackname, self.get_session())
         self.meta["updated"] = now_isoformat()
-        self._persist()
+        self.save()
 
-    def set_env(self):
+    def set_env(self, include_user_vars=False):
         os.environ.update(self.env)
+        if include_user_vars:
+            os.environ.update(self.user_vars)
+        os.environ["AWS_PROFILE"] = self.profile
 
-    def _persist(self):
-        self.path.mkdir(exist_ok=True)
-        self.path.joinpath(f"{self.name}.json").write_text(
-            json.dumps(self.meta, indent=4)
-        )
-        write_env_file(self.path.joinpath("env"), self.env)
+    def add_user_vars_from_file(self, path, save=False):
+        self.user_vars.update(load_env_file(path))
+        if save:
+            self.save()
+
+    def add_user_var(self, name, val, save=False):
+        self.user_vars[name] = val
+        if save:
+            self.save()
+
+    def del_user_var(self, name, save=False):
+        try:
+            del self.user_vars[name]
+        except KeyError:
+            pass
+        if save:
+            self.save()
+
+    def save(self):
+        self.path.write_text(json.dumps(self.meta, indent=4))
+
+    def exec(self, command, include_user_vars=True, isolated=False):
+        import os
+
+        if isolated:
+            env = self.env.copy()
+            if include_user_vars:
+                env.update(self.user_vars)
+            os.execlpe(command[0], *command, env)
+
+        self.set_env(include_user_vars=include_user_vars)
+        os.execlp(command[0], *command)

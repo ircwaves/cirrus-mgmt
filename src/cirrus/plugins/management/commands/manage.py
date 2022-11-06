@@ -79,7 +79,7 @@ def manage(ctx, project, deployment):
     Commands to run management operations against project deployments.
     """
     try:
-        ctx.obj = Deployment.from_dir(deployment, project)
+        ctx.obj = Deployment.from_name(deployment, project)
     except FileNotFoundError:
         logger.error("No such deployment: '%s'. Valid values:", deployment)
         for deployment in Deployment.yield_deployment_dirs(project):
@@ -92,13 +92,7 @@ def manage(ctx, project, deployment):
 def show(deployment):
     """Show a deployment configuration"""
     color = "blue"
-    click.secho(f"Deployment Name: {deployment.name}", fg=color)
-    click.secho("Info:", fg=color)
-    for k, v in deployment.meta.items():
-        click.secho(f"  {k}: {v}", fg=color)
-    click.secho("Environment Variables:", fg=color)
-    for k, v in deployment.env.items():
-        click.secho(f"  {k}: {v}", fg=color)
+    click.secho(json.dumps(deployment.meta, indent=4), fg=color)
 
 
 @manage.command("get-path")
@@ -268,6 +262,11 @@ def process(deployment):
     type=click.File(),
 )
 @click.option(
+    "--include-user-vars/--exclude-user-vars",
+    default=True,
+    help="Whether or not to load deployment's user vars into environment",
+)
+@click.option(
     "-x",
     "--var",
     "additional_vars",
@@ -285,11 +284,14 @@ def template_payload(
     additional_variable_files,
     additional_vars,
     silence_templating_errors,
+    include_user_vars,
 ):
     """Template a payload using a deployment's vars"""
     from cirrus.cli.payload import template_payload
 
     _vars = deployment.env.copy()
+    if include_user_vars:
+        _vars.update(deployment.user_vars)
     for f in additional_variable_files:
         _vars.update(load_env_file(f))
 
@@ -298,6 +300,30 @@ def template_payload(
             sys.stdin.read(), _vars, silence_templating_errors, **dict(additional_vars)
         )
     )
+
+
+@manage.command(
+    "exec",
+    context_settings={
+        "ignore_unknown_options": True,
+    },
+)
+@click.argument(
+    "command",
+    nargs=-1,
+)
+@click.option(
+    "--include-user-vars/--exclude-user-vars",
+    default=True,
+    help="Whether or not to load deployment's user vars into environment",
+)
+@pass_deployment
+@click.pass_context
+def _exec(ctx, deployment, command, include_user_vars):
+    """Run an executable with the deployment environment vars loaded"""
+    if not command:
+        return
+    deployment.exec(command, include_user_vars=include_user_vars)
 
 
 # check-pipeline

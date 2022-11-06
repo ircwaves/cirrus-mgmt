@@ -23,7 +23,7 @@ def deployments(project):
 @utils_click.requires_project
 def show(project):
     for deployment in Deployment.yield_deployment_dirs(project):
-        print(deployment.name)
+        click.echo(deployment.name)
 
 
 # TODO: better help
