@@ -1,67 +1,67 @@
 import json
 import logging
 import sys
+from functools import wraps
 
 import click
 from cirrus.cli.utils import click as utils_click
 from click_option_group import RequiredMutuallyExclusiveOptionGroup, optgroup
 
-from cirrus.plugins.management.deployment import Deployment, load_env_file
+from cirrus.plugins.management.deployment import Deployment
+from cirrus.plugins.management.utils.click import (
+    additional_variables,
+    silence_templating_errors,
+)
 
 logger = logging.getLogger(__name__)
-
-MAX_SQS_MESSAGE_LENGTH = 2**18  # max length of SQS message
 
 pass_deployment = click.make_pass_decorator(Deployment)
 
 
-def execution_arn(func):
-    from functools import wraps
+def _get_execution(deployment, arn=None, payload_id=None):
+    if payload_id:
+        return deployment.get_execution_by_payload_id(payload_id)
+    return deployment.get_execution(arn)
 
-    @optgroup.group(
+
+def execution_arn(func):
+    # reverse order because not using decorators
+    func = optgroup.option(
+        "--payload-id",
+        help="payload ID (resolves to latest execution ARN)",
+    )(func)
+    func = optgroup.option(
+        "--arn",
+        help="Execution ARN",
+    )(func)
+    func = optgroup.group(
         "Identifier",
         cls=RequiredMutuallyExclusiveOptionGroup,
         help="Identifer type and value to get execution",
-    )
-    @optgroup.option(
-        "--arn",
-        help="Execution ARN",
-    )
-    @optgroup.option(
-        "--payload-id",
-        help="payload ID (resolves to latest execution ARN)",
-    )
-    @wraps(func)
-    def wrapper(*args, **kwargs):
-        return func(*args, **kwargs)
-
-    return wrapper
+    )(func)
+    return func
 
 
 def raw_option(func):
-    from functools import wraps
-
-    @click.option(
+    return click.option(
         "-r",
         "--raw",
         is_flag=True,
         help="Do not pretty-format the response",
+    )(func)
+
+
+def include_user_vars(func):
+    @click.option(
+        "--include-user-vars/--exclude-user-vars",
+        default=True,
+        help="Whether or not to load deployment's user vars into environment",
     )
     @wraps(func)
     def wrapper(*args, **kwargs):
         return func(*args, **kwargs)
 
     return wrapper
-
-
-def _get_state(deployment, payload_id):
-    from cirrus.lib2.statedb import StateDB
-
-    statedb = StateDB(
-        table_name=deployment.env["CIRRUS_STATE_DB"],
-        session=deployment.get_session(),
-    )
-    return statedb.get_dbitem(payload_id)
 
 
 @click.group(
@@ -125,32 +125,21 @@ def refresh(deployment, stackname=None, profile=None):
 @pass_deployment
 def get_payload(deployment, payload_id, raw):
     """Get a payload from S3 using its ID"""
-    import io
-
-    from cirrus.lib2.statedb import StateDB
-
-    # TODO: error handling
-    bucket, key = StateDB.payload_id_to_bucket_key(
-        payload_id,
-        payload_bucket=deployment.env["CIRRUS_PAYLOAD_BUCKET"],
-    )
-    logger.debug("bucket: '%s', key: '%s'", bucket, key)
-
-    session = deployment.get_session()
-    s3 = session.client("s3")
+    import botocore
 
     def download(output_fileobj):
         try:
-            s3.download_fileobj(bucket, key, output_fileobj)
-        except s3.exceptions.ClientError as e:
+            deployment.get_payload_by_id(payload_id, output_fileobj)
+        except botocore.exceptions.ClientError as e:
             # TODO: understand why this is a ClientError even
             #   when it seems like it should be a NoKeyError
             logger.error(e)
-            sys.exit(1)
 
     if raw:
         download(sys.stdout.buffer)
     else:
+        import io
+
         with io.BytesIO() as b:
             download(b)
             b.seek(0)
@@ -166,15 +155,12 @@ def get_payload(deployment, payload_id, raw):
 @pass_deployment
 def get_execution(deployment, arn, payload_id, raw):
     """Get a workflow execution using its ARN or its input payload ID"""
-    if payload_id:
-        arn = _get_state(deployment, payload_id)["executions"][0]
+    execution = _get_execution(deployment, arn, payload_id)
 
-    sfn = deployment.get_session().client("stepfunctions")
-    resp = sfn.describe_execution(executionArn=arn)
     if raw:
-        click.echo(resp)
+        click.echo(execution)
     else:
-        click.echo(json.dumps(resp, indent=4, default=str))
+        click.echo(json.dumps(execution, indent=4, default=str))
 
 
 @manage.command("get-execution-input")
@@ -183,15 +169,12 @@ def get_execution(deployment, arn, payload_id, raw):
 @pass_deployment
 def get_execution_input(deployment, arn, payload_id, raw):
     """Get a workflow execution's input payload using its ARN or its input payload ID"""
-    if payload_id:
-        arn = _get_state(deployment, payload_id)["executions"][0]
+    _input = json.loads(_get_execution(deployment, arn, payload_id))["input"]
 
-    sfn = deployment.get_session().client("stepfunctions")
-    resp = json.loads(sfn.describe_execution(executionArn=arn)["input"])
     if raw:
-        click.echo(resp)
+        click.echo(_input)
     else:
-        click.echo(json.dumps(resp, indent=4, default=str))
+        click.echo(json.dumps(_input, indent=4, default=str))
 
 
 @manage.command("get-execution-output")
@@ -200,15 +183,12 @@ def get_execution_input(deployment, arn, payload_id, raw):
 @pass_deployment
 def get_execution_output(deployment, arn, payload_id, raw):
     """Get a workflow execution's output payload using its ARN or its input payload ID"""
-    if payload_id:
-        arn = _get_state(deployment, payload_id)["executions"][0]
+    output = json.loads(_get_execution(deployment, arn, payload_id))["output"]
 
-    sfn = deployment.get_session().client("stepfunctions")
-    resp = json.loads(sfn.describe_execution(executionArn=arn)["output"])
     if raw:
-        click.echo(resp)
+        click.echo(output)
     else:
-        click.echo(json.dumps(resp, indent=4, default=str))
+        click.echo(json.dumps(output, indent=4, default=str))
 
 
 @manage.command("get-state")
@@ -218,54 +198,21 @@ def get_execution_output(deployment, arn, payload_id, raw):
 @pass_deployment
 def get_state(deployment, payload_id):
     """Get the statedb record for a payload ID"""
-    item = _get_state(deployment, payload_id)
-
-    if item:
-        click.echo(json.dumps(item, indent=4))
-    else:
-        logger.error("No item found")
+    state = deployment.get_payload_state(payload_id)
+    click.echo(json.dumps(state, indent=4))
 
 
 @manage.command()
 @pass_deployment
 def process(deployment):
     """Enqueue a payload (from stdin) for processing"""
-    # add two to account for EOF and needing to know if greater than max length
-    payload = sys.stdin.read(MAX_SQS_MESSAGE_LENGTH + 2)
-
-    if len(payload.encode("utf-8")) > MAX_SQS_MESSAGE_LENGTH:
-        import uuid
-
-        sys.stdin.buffer.seek(0)
-        bucket = deployment.env["CIRRUS_PAYLOAD_BUCKET"]
-        key = f"payloads/{uuid.uuid1()}.json"
-        url = f"s3://{bucket}/{key}"
-        logger.warning("Message exceeds SQS max length.")
-        logger.warning("Uploading to '%s'", url)
-        s3 = deployment.get_session().client("s3")
-        s3.upload_fileobj(sys.stdin.buffer, bucket, key)
-        payload = json.dumps({"url": url})
-
-    sqs = deployment.get_session().client("sqs")
-    resp = sqs.send_message(
-        QueueUrl=deployment.env["CIRRUS_PROCESS_QUEUE_URL"],
-        MessageBody=payload,
-    )
-
-    click.echo(json.dumps(resp, indent=4))
+    click.echo(json.dumps(deployment.process_payload(sys.stdin), indent=4))
 
 
 @manage.command("template-payload")
-@click.argument(
-    "additional_variable_files",
-    nargs=-1,
-    type=click.File(),
-)
-@click.option(
-    "--include-user-vars/--exclude-user-vars",
-    default=True,
-    help="Whether or not to load deployment's user vars into environment",
-)
+@additional_variables
+@silence_templating_errors
+@include_user_vars
 @click.option(
     "-x",
     "--var",
@@ -281,24 +228,18 @@ def process(deployment):
 @pass_deployment
 def template_payload(
     deployment,
-    additional_variable_files,
-    additional_vars,
+    additional_variables,
     silence_templating_errors,
     include_user_vars,
 ):
     """Template a payload using a deployment's vars"""
-    from cirrus.cli.payload import template_payload
-
-    _vars = deployment.env.copy()
-    if include_user_vars:
-        _vars.update(deployment.user_vars)
-    for f in additional_variable_files:
-        _vars.update(load_env_file(f))
-
     click.echo(
-        template_payload(
-            sys.stdin.read(), _vars, silence_templating_errors, **dict(additional_vars)
-        )
+        deployment.template_payload(
+            sys.stdin.read(),
+            additional_variables,
+            silence_templating_errors,
+            include_user_vars,
+        ),
     )
 
 
@@ -312,11 +253,7 @@ def template_payload(
     "command",
     nargs=-1,
 )
-@click.option(
-    "--include-user-vars/--exclude-user-vars",
-    default=True,
-    help="Whether or not to load deployment's user vars into environment",
-)
+@include_user_vars
 @pass_deployment
 @click.pass_context
 def _exec(ctx, deployment, command, include_user_vars):

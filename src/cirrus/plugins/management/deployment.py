@@ -1,42 +1,16 @@
 import json
+import logging
 import os
-import shlex
 from datetime import datetime, timezone
 from pathlib import Path
 
+from .exceptions import NoExecutionsError, PayloadNotFoundError
 from .utils.boto3 import get_mfa_session, validate_session
 
+logger = logging.getLogger(__name__)
+
 DEFAULT_DEPLOYMENTS_DIR_NAME = "deployments"
-
-
-def load_env_file(path: Path):
-    env = {}
-
-    def load(flike):
-        for line in flike.readlines():
-            name, val = line.split("=")
-            val = shlex.split(val)
-
-            if len(val) != 1:
-                raise ValueError(f"Malformed env file: {path}")
-
-            env[name] = val[0]
-
-    if hasattr(path, "open"):
-        with path.open() as f:
-            load(f)
-    elif hasattr(path, "readlines"):
-        load(path)
-    else:
-        raise TypeError(f"Cannot load env file: {path}")
-
-    return env
-
-
-def write_env_file(path: Path, env):
-    with path.open("w") as f:
-        for name, val in env.items():
-            f.write(f"{name}={shlex.quote(val)}\n")
+MAX_SQS_MESSAGE_LENGTH = 2**18  # max length of SQS message
 
 
 def deployments_dir_from_project(project):
@@ -47,6 +21,10 @@ def deployments_dir_from_project(project):
 
 def now_isoformat():
     return datetime.now(timezone.utc).isoformat()
+
+
+def _maybe_use_buffer(fileobj):
+    return fileobj.buffer if hasattr(fileobj, "buffer") else fileobj
 
 
 class Deployment:
@@ -98,10 +76,14 @@ class Deployment:
         cls.get_path_from_project(project, name).unlink(missing_ok=True)
 
     @staticmethod
-    def yield_deployment_dirs(project):
-        for f in deployments_dir_from_project(project).iterdir():
-            if f.is_dir():
-                yield f
+    def yield_deployments(project):
+        for f in deployments_dir_from_project(project).glob("*.json"):
+            if f.is_file():
+                try:
+                    yield json.loads(f.read_text())["name"]
+                except Exception:
+                    logger.exception("failed on %s", f)
+                    pass
 
     @staticmethod
     def get_path_from_project(project, name: str):
@@ -147,13 +129,8 @@ class Deployment:
             os.environ.update(self.user_vars)
         os.environ["AWS_PROFILE"] = self.profile
 
-    def add_user_vars_from_file(self, path, save=False):
-        self.user_vars.update(load_env_file(path))
-        if save:
-            self.save()
-
-    def add_user_var(self, name, val, save=False):
-        self.user_vars[name] = val
+    def add_user_vars(self, _vars, save=False):
+        self.user_vars.update(_vars)
         if save:
             self.save()
 
@@ -179,3 +156,86 @@ class Deployment:
 
         self.set_env(include_user_vars=include_user_vars)
         os.execlp(command[0], *command)
+
+    def get_payload_state(self, payload_id):
+        from cirrus.lib2.statedb import StateDB
+
+        statedb = StateDB(
+            table_name=self.env["CIRRUS_STATE_DB"],
+            session=self.get_session(),
+        )
+        state = statedb.get_dbitem(payload_id)
+        if not state:
+            raise PayloadNotFoundError(payload_id)
+
+    def process_payload(self, payload):
+        stream = None
+
+        if hasattr(payload, "read"):
+            stream = _maybe_use_buffer(payload)
+            # add two to account for EOF and needing to know
+            # if greater than not just equal tomax length
+            payload = payload.read(MAX_SQS_MESSAGE_LENGTH + 2)
+
+        if len(payload.encode("utf-8")) > MAX_SQS_MESSAGE_LENGTH:
+            import uuid
+
+            stream.seek(0)
+            bucket = self.env["CIRRUS_PAYLOAD_BUCKET"]
+            key = f"payloads/{uuid.uuid1()}.json"
+            url = f"s3://{bucket}/{key}"
+            logger.warning("Message exceeds SQS max length.")
+            logger.warning("Uploading to '%s'", url)
+            s3 = self.get_session().client("s3")
+            s3.upload_fileobj(stream, bucket, key)
+            payload = json.dumps({"url": url})
+
+        sqs = self.get_session().client("sqs")
+        return sqs.send_message(
+            QueueUrl=self.env["CIRRUS_PROCESS_QUEUE_URL"],
+            MessageBody=payload,
+        )
+
+    def get_payload_by_id(self, payload_id, output_fileobj):
+        from cirrus.lib2.statedb import StateDB
+
+        # TODO: error handling
+        bucket, key = StateDB.payload_id_to_bucket_key(
+            payload_id,
+            payload_bucket=self.env["CIRRUS_PAYLOAD_BUCKET"],
+        )
+        logger.debug("bucket: '%s', key: '%s'", bucket, key)
+
+        s3 = self.get_session.client("s3")
+
+        return s3.download_fileobj(bucket, key, output_fileobj)
+
+    def get_execution(self, arn):
+        sfn = self.get_session().client("stepfunctions")
+        return sfn.describe_execution(executionArn=arn)
+
+    def get_execution_by_payload_id(self, payload_id):
+        execs = self.get_payload_state(payload_id).get("executions", [])
+        try:
+            exec_arn = execs[0]
+        except IndexError:
+            raise NoExecutionsError(payload_id)
+
+        return self.get_execution(exec_arn)
+
+    def template_payload(
+        self,
+        payload: str,
+        additional_vars: dict = None,
+        silence_templating_errors: bool = False,
+        include_user_vars: bool = True,
+    ):
+        from .utils.templating import template_payload
+
+        _vars = self.env.copy()
+        if include_user_vars:
+            _vars.update(self.user_vars)
+
+        return template_payload(
+            payload, _vars, silence_templating_errors, **dict(additional_vars)
+        )

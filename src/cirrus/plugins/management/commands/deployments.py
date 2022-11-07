@@ -22,8 +22,8 @@ def deployments(project):
 @deployments.command(aliases=["ls", "list"])
 @utils_click.requires_project
 def show(project):
-    for deployment in Deployment.yield_deployment_dirs(project):
-        click.echo(deployment.name)
+    for deployment_name in Deployment.yield_deployments(project):
+        click.echo(deployment_name)
 
 
 # TODO: better help

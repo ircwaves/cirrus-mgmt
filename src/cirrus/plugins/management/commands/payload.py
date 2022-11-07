@@ -5,6 +5,11 @@ import sys
 import click
 from cirrus.cli.utils import click as utils_click
 
+from cirrus.plugins.management.utils.click import (
+    additional_variables,
+    silence_templating_errors,
+)
+
 logger = logging.getLogger(__name__)
 
 
@@ -35,40 +40,13 @@ def get_id():
 
 
 @payload.command()
-@click.argument(
-    "variable_files",
-    nargs=-1,
-    type=click.File(),
-)
-@click.option(
-    "-x",
-    "--var",
-    "additional_vars",
-    nargs=2,
-    multiple=True,
-    help="Additional templating variables",
-)
-@click.option(
-    "--silence-templating-errors",
-    is_flag=True,
-)
-def template(variable_files, additional_vars, silence_templating_errors):
-    from cirrus.core.deployment import load_env_file
-
-    _vars = {}
-    for f in variable_files:
-        _vars.update(load_env_file(f))
+@additional_variables
+@silence_templating_errors
+def template(additional_variables, silence_templating_errors):
+    from cirrus.plugins.management.utils.templating import template_payload
 
     click.echo(
         template_payload(
-            sys.stdin.read(), _vars, silence_templating_errors, **dict(additional_vars)
+            sys.stdin.read(), additional_variables, silence_templating_errors
         )
     )
-
-
-def template_payload(template, mapping, silence_templating_errors=False, **kwargs):
-    from string import Template
-
-    logger.debug("Templating vars: %s", mapping)
-    template_fn = "safe_substitute" if silence_templating_errors else "substitute"
-    return getattr(Template(template), template_fn)(mapping, **kwargs)
