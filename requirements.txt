@@ -1,2 +1,2 @@
 click-option-group>=0.5.5
-cirrus-geo>=0.8.0
+git+https://github.com/cirrus-geo/cirrus-geo.git@mgmt-cli
