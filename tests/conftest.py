@@ -205,7 +205,7 @@ def mock_make_api_call(self, operation_name, kwarg):
     return orig(self, operation_name, kwarg)
 
 
-@pytest.fixture(autouse=True)
+@pytest.fixture
 def mock_lambda():
     with ExitStack() as stack:
         stack.enter_context(moto.mock_lambda())
@@ -226,6 +226,7 @@ def cli_runner():
 @pytest.fixture(scope="session")
 def invoke(cli_runner):
     def _invoke(cmd, **kwargs):
+        kwargs["catch_exceptions"] = kwargs.get("catch_exceptions", False)
         return cli_runner.invoke(cli, shlex.split(cmd), **kwargs)
 
     return _invoke

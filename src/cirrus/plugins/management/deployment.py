@@ -1,3 +1,4 @@
+import dataclasses
 import json
 import logging
 import os
@@ -11,6 +12,7 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_DEPLOYMENTS_DIR_NAME = "deployments"
 MAX_SQS_MESSAGE_LENGTH = 2**18  # max length of SQS message
+CONFIG_VERSION = 0
 
 
 def deployments_dir_from_project(project):
@@ -27,20 +29,47 @@ def _maybe_use_buffer(fileobj):
     return fileobj.buffer if hasattr(fileobj, "buffer") else fileobj
 
 
-class Deployment:
-    def __init__(
-        self,
-        path: Path,
-        meta: dict = None,
-    ):
-        self.path = path
-        self.meta = meta if meta else json.loads(path.read_text())
+@dataclasses.dataclass
+class DeploymentMeta:
+    name: str
+    created: str
+    updated: str
+    stackname: str
+    profile: str
+    environment: dict
+    user_vars: dict
+    config_version: int
 
-        self.name = self.meta["name"]
-        self.stackname = self.meta["stackname"]
-        self.profile = self.meta["profile"]
-        self.env = self.meta["environment"]
-        self.user_vars = self.meta.get("user_vars", {})
+    @classmethod
+    def load(cls, path: Path):
+        config = json.loads(path.read_text())
+        if version := config.get("config_version") != CONFIG_VERSION:
+            raise exceptions.DeploymentConfigurationError(
+                f"Unable to load config version: {version}",
+            )
+        try:
+            return cls(**config)
+        except TypeError as e:
+            raise exceptions.DeploymentConfigurationError(
+                f"Failed to load configuration: {e}",
+            )
+
+    def save(self):
+        self.path.write_text(self.asjson(indent=4))
+
+    def asdict(self):
+        return dataclasses.asdict(self)
+
+    def asjson(self, *args, **kwargs):
+        return json.dumps(self.asdict(), *args, **kwargs)
+
+
+@dataclasses.dataclass
+class Deployment(DeploymentMeta):
+    def __init__(self, path: Path, *args, **kwargs):
+        self.path = path
+
+        super().__init__(*args, **kwargs)
 
         self._session = None
 
@@ -59,20 +88,27 @@ class Deployment:
             "stackname": stackname,
             "profile": profile,
             "environment": env,
+            "user_vars": {},
+            "config_version": CONFIG_VERSION,
         }
 
         path = cls.get_path_from_project(project, name)
-        self = cls(path, meta)
+        self = cls(path, **meta)
         self.save()
 
         return self
 
     @classmethod
+    def from_file(cls, path: Path):
+        return cls(path, **DeploymentMeta.load(path).asdict())
+
+    @classmethod
     def from_name(cls, name: str, project):
         path = cls.get_path_from_project(project, name)
-        if not path.is_file():
-            raise exceptions.DeploymentNotFoundError(name)
-        return cls(path)
+        try:
+            return cls.from_file(path)
+        except FileNotFoundError:
+            raise exceptions.DeploymentNotFoundError(name) from None
 
     @classmethod
     def remove(cls, name: str, project):
@@ -83,7 +119,9 @@ class Deployment:
         for f in deployments_dir_from_project(project).glob("*.json"):
             if f.is_file():
                 try:
-                    yield json.loads(f.read_text())["name"]
+                    yield DeploymentMeta.load(f).name
+                except exceptions.DeploymentConfigurationError:
+                    yield f"{f.stem} (invalid configuration)"
                 except Exception:
                     logger.exception("failed on %s", f)
                     pass
@@ -119,15 +157,18 @@ class Deployment:
             self._session = self._get_session(profile=self.profile)
         return self._session
 
+    def reload(self):
+        self.__dict__.update(DeploymentMeta.load(self.path).asdict())
+
     def refresh(self, stackname: str = None, profile: str = None):
         self.stackname = stackname if stackname else self.stackname
         self.profile = profile if profile else self.profile
-        self.env = self.get_env_from_lambda(self.stackname, self.get_session())
-        self.meta["updated"] = now_isoformat()
+        self.environment = self.get_env_from_lambda(self.stackname, self.get_session())
+        self.updated = now_isoformat()
         self.save()
 
     def set_env(self, include_user_vars=False):
-        os.environ.update(self.env)
+        os.environ.update(self.environment)
         if include_user_vars:
             os.environ.update(self.user_vars)
         os.environ["AWS_PROFILE"] = self.profile
@@ -145,14 +186,11 @@ class Deployment:
         if save:
             self.save()
 
-    def save(self):
-        self.path.write_text(json.dumps(self.meta, indent=4))
-
     def exec(self, command, include_user_vars=True, isolated=False):
         import os
 
         if isolated:
-            env = self.env.copy()
+            env = self.environment.copy()
             if include_user_vars:
                 env.update(self.user_vars)
             os.execlpe(command[0], *command, env)
@@ -164,12 +202,13 @@ class Deployment:
         from cirrus.lib2.statedb import StateDB
 
         statedb = StateDB(
-            table_name=self.env["CIRRUS_STATE_DB"],
+            table_name=self.environment["CIRRUS_STATE_DB"],
             session=self.get_session(),
         )
         state = statedb.get_dbitem(payload_id)
         if not state:
             raise exceptions.PayloadNotFoundError(payload_id)
+        return state
 
     def process_payload(self, payload):
         stream = None
@@ -184,7 +223,7 @@ class Deployment:
             import uuid
 
             stream.seek(0)
-            bucket = self.env["CIRRUS_PAYLOAD_BUCKET"]
+            bucket = self.environment["CIRRUS_PAYLOAD_BUCKET"]
             key = f"payloads/{uuid.uuid1()}.json"
             url = f"s3://{bucket}/{key}"
             logger.warning("Message exceeds SQS max length.")
@@ -195,7 +234,7 @@ class Deployment:
 
         sqs = self.get_session().client("sqs")
         return sqs.send_message(
-            QueueUrl=self.env["CIRRUS_PROCESS_QUEUE_URL"],
+            QueueUrl=self.environment["CIRRUS_PROCESS_QUEUE_URL"],
             MessageBody=payload,
         )
 
@@ -205,11 +244,11 @@ class Deployment:
         # TODO: error handling
         bucket, key = StateDB.payload_id_to_bucket_key(
             payload_id,
-            payload_bucket=self.env["CIRRUS_PAYLOAD_BUCKET"],
+            payload_bucket=self.environment["CIRRUS_PAYLOAD_BUCKET"],
         )
         logger.debug("bucket: '%s', key: '%s'", bucket, key)
 
-        s3 = self.get_session.client("s3")
+        s3 = self.get_session().client("s3")
 
         return s3.download_fileobj(bucket, key, output_fileobj)
 
@@ -235,7 +274,7 @@ class Deployment:
     ):
         from .utils.templating import template_payload
 
-        _vars = self.env.copy()
+        _vars = self.environment.copy()
         if include_user_vars:
             _vars.update(self.user_vars)
 

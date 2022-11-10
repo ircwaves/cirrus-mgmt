@@ -5,6 +5,10 @@ class SSOError(CirrusError):
     pass
 
 
+class DeploymentConfigurationError(CirrusError):
+    pass
+
+
 class DeploymentNotFoundError(CirrusError):
     def __init__(self, deployment_name, *args, **kwargs):
         msg = f"Deployment not found: {deployment_name}"

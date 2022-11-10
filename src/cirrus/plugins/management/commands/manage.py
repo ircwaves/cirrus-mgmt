@@ -86,7 +86,7 @@ def manage(ctx, project, deployment):
 def show(deployment):
     """Show a deployment configuration"""
     color = "blue"
-    click.secho(json.dumps(deployment.meta, indent=4), fg=color)
+    click.secho(deployment.asjson(indent=4), fg=color)
 
 
 @manage.command("get-path")
@@ -163,7 +163,7 @@ def get_execution(deployment, arn, payload_id, raw):
 @pass_deployment
 def get_execution_input(deployment, arn, payload_id, raw):
     """Get a workflow execution's input payload using its ARN or its input payload ID"""
-    _input = json.loads(_get_execution(deployment, arn, payload_id))["input"]
+    _input = json.loads(_get_execution(deployment, arn, payload_id)["input"])
 
     if raw:
         click.echo(_input)
@@ -177,7 +177,7 @@ def get_execution_input(deployment, arn, payload_id, raw):
 @pass_deployment
 def get_execution_output(deployment, arn, payload_id, raw):
     """Get a workflow execution's output payload using its ARN or its input payload ID"""
-    output = json.loads(_get_execution(deployment, arn, payload_id))["output"]
+    output = json.loads(_get_execution(deployment, arn, payload_id)["output"])
 
     if raw:
         click.echo(output)

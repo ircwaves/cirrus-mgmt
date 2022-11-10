@@ -27,7 +27,7 @@ def test_deployments_show_no_deployments(deployments, project):
     assert len(result.stdout) == 0
 
 
-def test_deployments_add(deployments, project):
+def test_deployments_add(deployments, project, mock_lambda):
     result = deployments(f"add {DEPLYOMENT_NAME}")
     assert result.exit_code == 0
 
