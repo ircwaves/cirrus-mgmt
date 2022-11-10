@@ -4,7 +4,7 @@ import os
 from datetime import datetime, timezone
 from pathlib import Path
 
-from .exceptions import NoExecutionsError, PayloadNotFoundError
+from . import exceptions
 from .utils.boto3 import get_mfa_session, validate_session
 
 logger = logging.getLogger(__name__)
@@ -69,7 +69,10 @@ class Deployment:
 
     @classmethod
     def from_name(cls, name: str, project):
-        return cls(cls.get_path_from_project(project, name))
+        path = cls.get_path_from_project(project, name)
+        if not path.is_file():
+            raise exceptions.DeploymentNotFoundError(name)
+        return cls(path)
 
     @classmethod
     def remove(cls, name: str, project):
@@ -166,7 +169,7 @@ class Deployment:
         )
         state = statedb.get_dbitem(payload_id)
         if not state:
-            raise PayloadNotFoundError(payload_id)
+            raise exceptions.PayloadNotFoundError(payload_id)
 
     def process_payload(self, payload):
         stream = None
@@ -219,7 +222,7 @@ class Deployment:
         try:
             exec_arn = execs[0]
         except IndexError:
-            raise NoExecutionsError(payload_id)
+            raise exceptions.NoExecutionsError(payload_id)
 
         return self.get_execution(exec_arn)
 

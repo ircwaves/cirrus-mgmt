@@ -78,13 +78,7 @@ def manage(ctx, project, deployment):
     """
     Commands to run management operations against project deployments.
     """
-    try:
-        ctx.obj = Deployment.from_name(deployment, project)
-    except FileNotFoundError:
-        logger.error("No such deployment: '%s'. Valid values:", deployment)
-        for deployment in Deployment.yield_deployment_dirs(project):
-            logger.error(f"    {deployment.name}")
-        sys.exit(1)
+    ctx.obj = Deployment.from_name(deployment, project)
 
 
 @manage.command()

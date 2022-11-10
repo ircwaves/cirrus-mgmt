@@ -113,6 +113,13 @@ def payloads(s3):
 
 
 @pytest.fixture
+def data(s3):
+    name = "data"
+    s3.create_bucket(Bucket=name)
+    return name
+
+
+@pytest.fixture
 def queue(sqs):
     q = sqs.create_queue(QueueName="test-queue")
     q["Arn"] = "arn:aws:sqs:us-east-1:123456789012:test-queue"
@@ -209,17 +216,6 @@ def mock_lambda():
             )
         )
         yield boto3.client("lambda")
-
-
-@pytest.fixture(autouse=True)
-def env(queue, statedb, payloads, eventdb=None):
-    os.environ["CIRRUS_PROCESS_QUEUE_URL"] = queue["QueueUrl"]
-    os.environ["CIRRUS_STATE_DB"] = statedb.table_name
-    if eventdb:
-        os.environ[
-            "CIRRUS_EVENT_DB_AND_TABLE"
-        ] = f"{eventdb.event_db_name}|{eventdb.event_table_name}"
-    os.environ["CIRRUS_PAYLOAD_BUCKET"] = payloads
 
 
 @pytest.fixture(scope="session")
