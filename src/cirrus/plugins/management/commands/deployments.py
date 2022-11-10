@@ -50,4 +50,4 @@ def add(project, name, stackname=None, profile=None):
     metavar="name",
 )
 def remove(project, name):
-    Deployment.remove(project, name)
+    Deployment.remove(name, project)
