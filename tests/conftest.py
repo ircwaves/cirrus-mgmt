@@ -2,7 +2,6 @@ import json
 import os
 import shlex
 import shutil
-from contextlib import ExitStack
 from pathlib import Path
 from unittest.mock import patch
 
@@ -206,16 +205,12 @@ def mock_make_api_call(self, operation_name, kwarg):
 
 
 @pytest.fixture
-def mock_lambda():
-    with ExitStack() as stack:
-        stack.enter_context(moto.mock_lambda())
-        stack.enter_context(
-            patch(
-                "botocore.client.BaseClient._make_api_call",
-                new=mock_make_api_call,
-            )
-        )
-        yield boto3.client("lambda")
+def mock_lambda_get_conf():
+    with patch(
+        "botocore.client.BaseClient._make_api_call",
+        new=mock_make_api_call,
+    ):
+        yield
 
 
 @pytest.fixture(scope="session")

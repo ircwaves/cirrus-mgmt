@@ -90,7 +90,7 @@ def test_manage_get_path(deployment, project):
     )
 
 
-def test_manage_refresh(deployment, mock_lambda, lambda_env):
+def test_manage_refresh(deployment, mock_lambda_get_conf, lambda_env):
     result = deployment("refresh")
     assert result.exit_code == 0
     new = json.loads(deployment("show").stdout)
