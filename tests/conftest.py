@@ -1,5 +1,6 @@
 import json
 import os
+import shlex
 import shutil
 from contextlib import ExitStack
 from pathlib import Path
@@ -9,8 +10,11 @@ import boto3
 import botocore
 import moto
 import pytest
+from cirrus.cli.commands import cli
+from click.testing import CliRunner
 
 try:
+    # temporary measure while waiting on pending PRs
     from cirrus.lib2.eventdb import EventDB
 except ImportError:
     EventDB = None
@@ -216,3 +220,16 @@ def env(queue, statedb, payloads, eventdb=None):
             "CIRRUS_EVENT_DB_AND_TABLE"
         ] = f"{eventdb.event_db_name}|{eventdb.event_table_name}"
     os.environ["CIRRUS_PAYLOAD_BUCKET"] = payloads
+
+
+@pytest.fixture(scope="session")
+def cli_runner():
+    return CliRunner(mix_stderr=False)
+
+
+@pytest.fixture(scope="session")
+def invoke(cli_runner):
+    def _invoke(cmd, **kwargs):
+        return cli_runner.invoke(cli, shlex.split(cmd), **kwargs)
+
+    return _invoke
