@@ -207,18 +207,6 @@ def process(deployment):
 @additional_variables
 @silence_templating_errors
 @include_user_vars
-@click.option(
-    "-x",
-    "--var",
-    "additional_vars",
-    nargs=2,
-    multiple=True,
-    help="Additional templating variables",
-)
-@click.option(
-    "--silence-templating-errors",
-    is_flag=True,
-)
 @pass_deployment
 def template_payload(
     deployment,
