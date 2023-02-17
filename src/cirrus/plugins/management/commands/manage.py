@@ -8,6 +8,7 @@ from cirrus.cli.utils import click as utils_click
 from click_option_group import RequiredMutuallyExclusiveOptionGroup, optgroup
 
 from cirrus.plugins.management.deployment import Deployment
+from cirrus.plugins.management import workflow
 from cirrus.plugins.management.utils.click import (
     additional_variables,
     silence_templating_errors,
@@ -109,6 +110,25 @@ def refresh(deployment, stackname=None, profile=None):
     optionally changing the stackname or profile.
     """
     deployment.refresh(stackname=stackname, profile=profile)
+
+
+@manage.command("run-workflow")
+@click.argument(
+    "payload-path",
+)
+@raw_option
+@click.option(
+    "-o",
+    "--out-path",
+    type=str,
+    help="Write output payload to the given path",
+)
+@pass_deployment
+def run_workflow(deployment, payload_path, raw, out_path=None):
+    """Pass a payload off to a deployment, wait for the workflow to finish, retrieve and return its
+    output payload"""
+    output = workflow.run(deployment, payload_path, out_path=out_path)
+    click.echo(json.dump(output, sys.stdout, indent=4 if not raw else None))
 
 
 @manage.command("get-payload")
