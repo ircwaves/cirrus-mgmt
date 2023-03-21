@@ -4,6 +4,7 @@ import logging
 import os
 from datetime import datetime, timezone
 from pathlib import Path
+from subprocess import check_call
 
 from . import exceptions
 from .utils.boto3 import get_mfa_session, validate_session
@@ -187,16 +188,14 @@ class Deployment(DeploymentMeta):
             self.save()
 
     def exec(self, command, include_user_vars=True, isolated=False):
-        import os
-
         if isolated:
             env = self.environment.copy()
             if include_user_vars:
                 env.update(self.user_vars)
-            os.execlpe(command[0], *command, env)
-
-        self.set_env(include_user_vars=include_user_vars)
-        os.execlp(command[0], *command)
+            check_call(command, env=env)
+        else:
+            self.set_env(include_user_vars=include_user_vars)
+            check_call(command)
 
     def get_payload_state(self, payload_id):
         from cirrus.lib2.statedb import StateDB
