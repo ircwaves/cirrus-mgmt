@@ -1,11 +1,13 @@
 import dataclasses
+from datetime import datetime, timezone
 import json
 import logging
 import os
-from datetime import datetime, timezone
+from time import sleep, time_ns, time
 from pathlib import Path
 from subprocess import check_call
 
+from cirrus.lib2.process_payload import ProcessPayload
 from . import exceptions
 from .utils.boto3 import get_mfa_session, validate_session
 
@@ -14,6 +16,8 @@ logger = logging.getLogger(__name__)
 DEFAULT_DEPLOYMENTS_DIR_NAME = "deployments"
 MAX_SQS_MESSAGE_LENGTH = 2**18  # max length of SQS message
 CONFIG_VERSION = 0
+
+WORKFLOW_POLL_INTERVAL = 5  # seconds between state checks
 
 
 def deployments_dir_from_project(project):
@@ -263,6 +267,58 @@ class Deployment(DeploymentMeta):
             raise exceptions.NoExecutionsError(payload_id)
 
         return self.get_execution(exec_arn)
+
+    def run_workflow(
+        self,
+        payload: dict,
+        timeout: int = 3600,
+        out_path: str = "",
+    ) -> dict:
+        """
+
+        Args:
+            deployment (Deployment): where the workflow will be run.
+
+            payload_path (str): path to payload to pass to the deployment to kick off the workflow.
+
+            timeout (Optional[int]): - upper bound on the number of seconds to poll the deployment before
+                                       considering the test failed.
+
+            out_path (Optional[str]): - path to write the output or error message to.
+
+        Returns:
+            dict containing output payload or error message
+
+        """
+        payload = ProcessPayload(payload)
+        wf_id = payload["id"]
+        logger.info("Submitting %s to %s", wf_id, self.name)
+        resp = self.process_payload(json.dumps(payload))
+        logger.debug(resp)
+
+        state = "PROCESSING"
+        end_time = time() + timeout - WORKFLOW_POLL_INTERVAL
+        while state == "PROCESSING" and time() < end_time:
+            sleep(WORKFLOW_POLL_INTERVAL)
+            resp = self.get_payload_state(wf_id)
+            state = resp["state_updated"].split("_")[0]
+            logger.debug({"state": state})
+
+        execution = self.get_execution_by_payload_id(wf_id)
+
+        if state == "COMPLETED":
+            output = dict(ProcessPayload.from_event(json.loads(execution["output"])))
+        elif state == "PROCESSING":
+            output = {"last_error": "Unkonwn: cirrus-mgmt polling timeout exceeded"}
+        else:
+            output = {"last_error": resp.get("last_error", "last error not recorded")}
+
+        if out_path:
+            with open(out_path, "w", encoding="utf-8") as ofile:
+                json.dump(output, ofile, indent=2, sort_keys=True)
+                ofile.write("\n")
+
+        return output
 
     def template_payload(
         self,

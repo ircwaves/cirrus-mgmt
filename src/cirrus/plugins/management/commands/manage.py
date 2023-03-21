@@ -1,6 +1,7 @@
 import json
 import logging
 import sys
+from time import time_ns
 from functools import wraps
 
 import click
@@ -8,7 +9,6 @@ from cirrus.cli.utils import click as utils_click
 from click_option_group import RequiredMutuallyExclusiveOptionGroup, optgroup
 
 from cirrus.plugins.management.deployment import Deployment
-from cirrus.plugins.management import workflow
 from cirrus.plugins.management.utils.click import (
     additional_variables,
     silence_templating_errors,
@@ -116,18 +116,39 @@ def refresh(deployment, stackname=None, profile=None):
 @click.argument(
     "payload-path",
 )
-@raw_option
+@click.option(
+    "-f",
+    "--force",
+    type=bool,
+    default=True,
+    help="Force workflow to run",
+)
+@click.option(
+    "-t",
+    "--timeout",
+    type=int,
+    default=3600,
+    help="Maximum time (seconds) to allow for the workflow to complete",
+)
 @click.option(
     "-o",
     "--out-path",
     type=str,
+    default="",
     help="Write output payload to the given path",
 )
+@raw_option
 @pass_deployment
-def run_workflow(deployment, payload_path, raw, out_path=None):
+def run_workflow(deployment, payload_path, force, timeout, raw, out_path):
     """Pass a payload off to a deployment, wait for the workflow to finish, retrieve and return its
     output payload"""
-    output = workflow.run(deployment, payload_path, out_path=out_path)
+    with open(payload_path, "r", encoding="utf-8") as infile:
+        payload = json.load(infile)
+    if force:
+        # inject current time to cause payload ID to be unique
+        payload["id"] = f"{payload.get('id', '')} {time_ns()}".strip().replace(" ", "-")
+
+    output = deployment.run_workflow(payload, timeout, out_path)
     click.echo(json.dump(output, sys.stdout, indent=4 if not raw else None))
 
 
