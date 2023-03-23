@@ -176,7 +176,8 @@ class Deployment(DeploymentMeta):
         os.environ.update(self.environment)
         if include_user_vars:
             os.environ.update(self.user_vars)
-        os.environ["AWS_PROFILE"] = self.profile
+        if self.profile:
+            os.environ["AWS_PROFILE"] = self.profile
 
     def add_user_vars(self, _vars, save=False):
         self.user_vars.update(_vars)
