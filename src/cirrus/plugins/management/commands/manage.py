@@ -126,8 +126,7 @@ def refresh(deployment, stackname=None, profile=None):
 @click.option(
     "-f",
     "--force-rerun",
-    type=bool,
-    default=True,
+    is_flag=True,
     help="Force workflow to run",
 )
 @click.option(
