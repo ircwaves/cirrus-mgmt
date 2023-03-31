@@ -1,13 +1,15 @@
 import dataclasses
-from datetime import datetime, timezone
 import json
 import logging
 import os
-from time import sleep, time_ns, time
+from datetime import datetime, timezone
 from pathlib import Path
+from pprint import pprint
 from subprocess import check_call
+from time import sleep, time, time_ns
 
 from cirrus.lib2.process_payload import ProcessPayload
+
 from . import exceptions
 from .utils.boto3 import get_mfa_session, validate_session
 
@@ -273,6 +275,7 @@ class Deployment(DeploymentMeta):
         self,
         payload: dict,
         timeout: int = 3600,
+        force_rerun: bool = False,
         out_path: str = "",
     ) -> dict:
         """
@@ -292,6 +295,8 @@ class Deployment(DeploymentMeta):
 
         """
         payload = ProcessPayload(payload)
+        if force_rerun:
+            payload["id"] = f"{payload['id']}/deploy-test-{time_ns()/1000}"
         wf_id = payload["id"]
         logger.info("Submitting %s to %s", wf_id, self.name)
         resp = self.process_payload(json.dumps(payload))
