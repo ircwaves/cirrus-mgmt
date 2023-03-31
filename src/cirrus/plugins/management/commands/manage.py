@@ -2,7 +2,6 @@ import json
 import logging
 import sys
 from functools import wraps
-from time import time_ns
 
 import click
 from cirrus.cli.utils import click as utils_click
@@ -143,9 +142,6 @@ def run_workflow(deployment, payload_path, timeout, force_rerun, raw, out_path):
     output payload"""
     with open(payload_path, "r", encoding="utf-8") as infile:
         payload = json.load(infile)
-    if force:
-        # inject current time to cause payload ID to be unique
-        payload["id"] = f"{payload.get('id', '')} {time_ns()}".strip().replace(" ", "-")
 
     output = deployment.run_workflow(
         payload=payload, timeout=timeout, force_rerun=force_rerun, out_path=out_path
