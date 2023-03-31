@@ -296,7 +296,7 @@ class Deployment(DeploymentMeta):
         """
         payload = ProcessPayload(payload)
         if force_rerun:
-            payload["id"] = f"{payload['id']}-{time_ns()/1000}"
+            payload["id"] = f"{payload['id']}-{time_ns()}"
         wf_id = payload["id"]
         logger.info("Submitting %s to %s", wf_id, self.name)
         resp = self.process_payload(json.dumps(payload))
