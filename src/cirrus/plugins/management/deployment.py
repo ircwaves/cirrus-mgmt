@@ -211,7 +211,13 @@ class Deployment(DeploymentMeta):
             table_name=self.environment["CIRRUS_STATE_DB"],
             session=self.get_session(),
         )
-        state = statedb.get_dbitem(payload_id)
+
+        @backoff.on_exception(backoff.expo, PayloadNotFoundError, max_time=60)
+        def _get_payload_item_from_statedb(statedb, payload_id):
+            return statedb.get_dbitem(payload_id)
+
+        state = _get_payload_item_from_statedb(statedb, payload_id)
+
         if not state:
             raise exceptions.PayloadNotFoundError(payload_id)
         return state
