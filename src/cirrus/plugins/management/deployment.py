@@ -5,7 +5,7 @@ import os
 from datetime import datetime, timezone
 from pathlib import Path
 from subprocess import CalledProcessError, check_call
-from time import sleep, time
+from time import sleep, time, time_ns
 
 import backoff
 from cirrus.lib2.process_payload import ProcessPayload
@@ -325,6 +325,7 @@ class Deployment(DeploymentMeta):
         self,
         payload: dict,
         timeout: int = 3600,
+        force_rerun: bool = False,
         poll_interval: int = WORKFLOW_POLL_INTERVAL,
     ) -> dict:
         """
@@ -345,6 +346,8 @@ class Deployment(DeploymentMeta):
 
         """
         payload = ProcessPayload(payload)
+        if force_rerun:
+            payload["id"] = f"{payload['id']}-{time_ns()}"
         wf_id = payload["id"]
         logger.info("Submitting %s to %s", wf_id, self.name)
         resp = self.process_payload(json.dumps(payload))
