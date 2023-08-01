@@ -7,7 +7,7 @@ import click
 from cirrus.cli.utils import click as utils_click
 from click_option_group import RequiredMutuallyExclusiveOptionGroup, optgroup
 
-from cirrus.plugins.management.deployment import Deployment
+from cirrus.plugins.management.deployment import WORKFLOW_POLL_INTERVAL, Deployment
 from cirrus.plugins.management.utils.click import (
     additional_variables,
     silence_templating_errors,
@@ -111,6 +111,36 @@ def refresh(deployment, stackname=None, profile=None):
     deployment.refresh(stackname=stackname, profile=profile)
 
 
+@manage.command("run-workflow")
+@click.option(
+    "-t",
+    "--timeout",
+    type=int,
+    default=3600,
+    help="Maximum time (seconds) to allow for the workflow to complete",
+)
+@click.option(
+    "-p",
+    "--poll-interval",
+    type=int,
+    default=WORKFLOW_POLL_INTERVAL,
+    help="Maximum time (seconds) to allow for the workflow to complete",
+)
+@raw_option
+@pass_deployment
+def run_workflow(deployment, timeout, raw, poll_interval):
+    """Pass a payload (from stdin) off to a deployment, wait for the workflow to finish,
+    retrieve and return its output payload"""
+    payload = json.load(sys.stdin.read())
+
+    output = deployment.run_workflow(
+        payload=payload,
+        timeout=timeout,
+        poll_interval=poll_interval,
+    )
+    click.echo(json.dump(output, sys.stdout, indent=4 if not raw else None))
+
+
 @manage.command("get-payload")
 @click.argument(
     "payload-id",
@@ -203,6 +233,18 @@ def process(deployment):
     click.echo(json.dumps(deployment.process_payload(sys.stdin), indent=4))
 
 
+@manage.command()
+@click.argument(
+    "lambda-name",
+)
+@pass_deployment
+def invoke_lambda(deployment, lambda_name):
+    """Invoke lambda with event (from stdin)"""
+    click.echo(
+        json.dumps(deployment.invoke_lambda(sys.stdin.read(), lambda_name), indent=4)
+    )
+
+
 @manage.command("template-payload")
 @additional_variables
 @silence_templating_errors
@@ -243,6 +285,38 @@ def _exec(ctx, deployment, command, include_user_vars):
     if not command:
         return
     deployment.exec(command, include_user_vars=include_user_vars)
+
+
+@manage.command(
+    "call",
+    context_settings={
+        "ignore_unknown_options": True,
+    },
+)
+@click.argument(
+    "command",
+    nargs=-1,
+)
+@include_user_vars
+@pass_deployment
+@click.pass_context
+def _call(ctx, deployment, command, include_user_vars):
+    """Run an executable, in a new process, with the deployment environment vars loaded"""
+    if not command:
+        return
+    deployment.call(command, include_user_vars=include_user_vars)
+
+
+@manage.command()
+@pass_deployment
+@click.pass_context
+def list_lambdas(ctx, deployment):
+    """List lambda functions"""
+    click.echo(
+        json.dumps(
+            {"Functions": deployment.get_lambda_functions()}, indent=4, default=str
+        )
+    )
 
 
 # check-pipeline

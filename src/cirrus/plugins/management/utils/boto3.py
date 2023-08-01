@@ -25,14 +25,18 @@ def get_mfa_session(**kwargs):
             key/value pairs defined in this dictionary will override the
             corresponding variables defined in ``SESSION_VARIABLES``.
     """
-    # Change the cache path from the default of
-    # ~/.aws/boto/cache to the one used by awscli
-    working_dir = os.path.join(os.path.expanduser("~"), ".aws/cli/cache")
+    profile = kwargs.get("profile", None)
 
     # Construct botocore session with cache
     session = botocore.session.Session(**kwargs)
     provider = session.get_component("credential_provider").get_provider("assume-role")
-    provider.cache = credentials.JSONFileCache(working_dir)
+    if profile:
+        # If ``profile`` is provided, then we need to
+        # change the cache path from the default of
+        # ~/.aws/boto/cache to the one used by awscli.
+        # Without ``profile``, we defer to normal boto operations.
+        working_dir = os.path.join(os.path.expanduser("~"), ".aws/cli/cache")
+        provider.cache = credentials.JSONFileCache(working_dir)
 
     return boto3.Session(botocore_session=session)
 

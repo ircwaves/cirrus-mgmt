@@ -4,6 +4,11 @@ import logging
 import os
 from datetime import datetime, timezone
 from pathlib import Path
+from subprocess import check_call
+from time import sleep, time
+
+import backoff
+from cirrus.lib2.process_payload import ProcessPayload
 
 from . import exceptions
 from .utils.boto3 import get_mfa_session, validate_session
@@ -13,6 +18,8 @@ logger = logging.getLogger(__name__)
 DEFAULT_DEPLOYMENTS_DIR_NAME = "deployments"
 MAX_SQS_MESSAGE_LENGTH = 2**18  # max length of SQS message
 CONFIG_VERSION = 0
+
+WORKFLOW_POLL_INTERVAL = 15  # seconds between state checks
 
 
 def deployments_dir_from_project(project):
@@ -72,6 +79,7 @@ class Deployment(DeploymentMeta):
         super().__init__(*args, **kwargs)
 
         self._session = None
+        self._functions = None
 
     @classmethod
     def create(cls, name: str, project, stackname: str = None, profile: str = None):
@@ -152,6 +160,24 @@ class Deployment(DeploymentMeta):
 
         return process_conf["Environment"]["Variables"]
 
+    def get_lambda_functions(self):
+        if self._functions is None:
+            aws_lambda = self.get_session().client("lambda")
+
+            def deployment_functions_filter(response):
+                return [
+                    f["FunctionName"].replace(f"{self.stackname}-", "")
+                    for f in response["Functions"]
+                    if f["FunctionName"].startswith(self.stackname)
+                ]
+
+            resp = aws_lambda.list_functions()
+            self._functions = deployment_functions_filter(resp)
+            while "NextMarker" in resp:
+                resp = aws_lambda.list_functions(Marker=resp["NextMarker"])
+                self._functions += deployment_functions_filter(resp)
+        return self._functions
+
     def get_session(self):
         if not self._session:
             self._session = self._get_session(profile=self.profile)
@@ -171,7 +197,8 @@ class Deployment(DeploymentMeta):
         os.environ.update(self.environment)
         if include_user_vars:
             os.environ.update(self.user_vars)
-        os.environ["AWS_PROFILE"] = self.profile
+        if self.profile:
+            os.environ["AWS_PROFILE"] = self.profile
 
     def add_user_vars(self, _vars, save=False):
         self.user_vars.update(_vars)
@@ -198,6 +225,16 @@ class Deployment(DeploymentMeta):
         self.set_env(include_user_vars=include_user_vars)
         os.execlp(command[0], *command)
 
+    def call(self, command, include_user_vars=True, isolated=False):
+        if isolated:
+            env = self.environment.copy()
+            if include_user_vars:
+                env.update(self.user_vars)
+            check_call(command, env=env)
+        else:
+            self.set_env(include_user_vars=include_user_vars)
+            check_call(command)
+
     def get_payload_state(self, payload_id):
         from cirrus.lib2.statedb import StateDB
 
@@ -205,7 +242,13 @@ class Deployment(DeploymentMeta):
             table_name=self.environment["CIRRUS_STATE_DB"],
             session=self.get_session(),
         )
-        state = statedb.get_dbitem(payload_id)
+
+        @backoff.on_predicate(backoff.expo, lambda x: x is None, max_time=60)
+        def _get_payload_item_from_statedb(statedb, payload_id):
+            return statedb.get_dbitem(payload_id)
+
+        state = _get_payload_item_from_statedb(statedb, payload_id)
+
         if not state:
             raise exceptions.PayloadNotFoundError(payload_id)
         return state
@@ -264,6 +307,67 @@ class Deployment(DeploymentMeta):
             raise exceptions.NoExecutionsError(payload_id)
 
         return self.get_execution(exec_arn)
+
+    def invoke_lambda(self, event, function_name):
+        aws_lambda = self.get_session().client("lambda")
+        if function_name not in self.get_lambda_functions():
+            raise ValueError(
+                f"lambda named '{function_name}' not found in deployment '{self.name}'"
+            )
+        full_name = f"{self.stackname}-{function_name}"
+        response = aws_lambda.invoke(FunctionName=full_name, Payload=event)
+        if response["StatusCode"] < 200 or response["StatusCode"] > 299:
+            raise RuntimeError(response)
+
+        return json.load(response["Payload"])
+
+    def run_workflow(
+        self,
+        payload: dict,
+        timeout: int = 3600,
+        poll_interval: int = WORKFLOW_POLL_INTERVAL,
+    ) -> dict:
+        """
+
+        Args:
+            deployment (Deployment): where the workflow will be run.
+
+            payload (str): payload to pass to the deployment to kick off the workflow.
+
+            timeout (Optional[int]): - upper bound on the number of seconds to poll the
+                                       deployment before considering the test failed.
+
+            poll_interval (Optional[int]): - seconds to delay between checks of the
+                                             workflow status.
+
+        Returns:
+            dict containing output payload or error message
+
+        """
+        payload = ProcessPayload(payload)
+        wf_id = payload["id"]
+        logger.info("Submitting %s to %s", wf_id, self.name)
+        resp = self.process_payload(json.dumps(payload))
+        logger.debug(resp)
+
+        state = "PROCESSING"
+        end_time = time() + timeout - poll_interval
+        while state == "PROCESSING" and time() < end_time:
+            sleep(poll_interval)
+            resp = self.get_payload_state(wf_id)
+            state = resp["state_updated"].split("_")[0]
+            logger.debug({"state": state})
+
+        execution = self.get_execution_by_payload_id(wf_id)
+
+        if state == "COMPLETED":
+            output = dict(ProcessPayload.from_event(json.loads(execution["output"])))
+        elif state == "PROCESSING":
+            output = {"last_error": "Unkonwn: cirrus-mgmt polling timeout exceeded"}
+        else:
+            output = {"last_error": resp.get("last_error", "last error not recorded")}
+
+        return output
 
     def template_payload(
         self,
