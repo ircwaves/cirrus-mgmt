@@ -131,7 +131,7 @@ def refresh(deployment, stackname=None, profile=None):
 def run_workflow(deployment, timeout, raw, poll_interval):
     """Pass a payload (from stdin) off to a deployment, wait for the workflow to finish,
     retrieve and return its output payload"""
-    payload = json.load(sys.stdin.read())
+    payload = json.loads(sys.stdin.read())
 
     output = deployment.run_workflow(
         payload=payload,
