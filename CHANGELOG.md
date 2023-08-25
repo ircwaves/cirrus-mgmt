@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ## [Unreleased]
 
+### Fixed
+- CLI `run-workflow` dropped an `s` from `json.loads`, and the help text on the
+  timout argument was
+  incorrect. ([#5](https://github.com/cirrus-geo/cirrus-mgmt/pull/5)
+
 ## [v0.1.0] - 2023-08-01
 
 ### Added
