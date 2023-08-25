@@ -124,7 +124,7 @@ def refresh(deployment, stackname=None, profile=None):
     "--poll-interval",
     type=int,
     default=WORKFLOW_POLL_INTERVAL,
-    help="Maximum time (seconds) to allow for the workflow to complete",
+    help="Time (seconds) to dwell between polling for workflow status",
 )
 @raw_option
 @pass_deployment
