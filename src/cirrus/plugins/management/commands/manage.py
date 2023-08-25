@@ -124,14 +124,14 @@ def refresh(deployment, stackname=None, profile=None):
     "--poll-interval",
     type=int,
     default=WORKFLOW_POLL_INTERVAL,
-    help="Maximum time (seconds) to allow for the workflow to complete",
+    help="Time (seconds) to dwell between polling for workflow status",
 )
 @raw_option
 @pass_deployment
 def run_workflow(deployment, timeout, raw, poll_interval):
     """Pass a payload (from stdin) off to a deployment, wait for the workflow to finish,
     retrieve and return its output payload"""
-    payload = json.load(sys.stdin.read())
+    payload = json.loads(sys.stdin.read())
 
     output = deployment.run_workflow(
         payload=payload,
