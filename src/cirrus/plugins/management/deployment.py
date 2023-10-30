@@ -302,7 +302,7 @@ class Deployment(DeploymentMeta):
     def get_execution_by_payload_id(self, payload_id):
         execs = self.get_payload_state(payload_id).get("executions", [])
         try:
-            exec_arn = execs[0]
+            exec_arn = execs[-1]
         except IndexError:
             raise exceptions.NoExecutionsError(payload_id)
 
