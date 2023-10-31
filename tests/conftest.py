@@ -19,6 +19,7 @@ except ImportError:
     EventDB = None
 
 from cirrus.core.project import Project
+from cirrus.lib2.process_payload import ProcessPayload, ProcessPayloads
 from cirrus.lib2.statedb import StateDB
 
 
@@ -225,3 +226,14 @@ def invoke(cli_runner):
         return cli_runner.invoke(cli, shlex.split(cmd), **kwargs)
 
     return _invoke
+
+
+@pytest.fixture
+def basic_payloads(fixtures):
+    return ProcessPayloads(
+        process_payloads=[
+            ProcessPayload(
+                json.loads(fixtures.joinpath("basic_payload.json").read_text())
+            )
+        ]
+    )
