@@ -120,3 +120,4 @@ def test_manage_get_execution_by_payload_id(deployment, basic_payloads, statedb)
 @pytest.mark.parametrize("command,expect_exit_zero", (("true", True), ("false", False)))
 def test_call_cli_return_values(deployment, command, expect_exit_zero):
     result = deployment(f"call {command}")
+    assert result.exit_code == 0 if expect_exit_zero else result.exit_code != 0
