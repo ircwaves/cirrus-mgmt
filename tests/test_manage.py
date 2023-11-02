@@ -101,8 +101,10 @@ def test_manage_refresh(deployment, mock_lambda_get_conf, lambda_env):
     assert new["environment"] == lambda_env
 
 
-# @pytest.mark.parametrize("item", (
 def test_manage_get_execution_by_payload_id(deployment, basic_payloads, statedb):
+    """Adds causes two workflow executions, and confirms that the second call to
+    get_execution_by_payload_id gets a different executionArn value from the first execution.
+    """
     current_env = deepcopy(os.environ)  # stash env
     deployment.set_env()
     basic_payloads.process()
@@ -113,3 +115,9 @@ def test_manage_get_execution_by_payload_id(deployment, basic_payloads, statedb)
     sfn_exe2 = deployment.get_execution_by_payload_id(pid)
     assert sfn_exe1["executionArn"] != sfn_exe2["executionArn"]
     os.environ = current_env  # pop stash
+
+
+@pytest.mark.parametrize("command,expect_exit_zero", (("true", True), ("false", False)))
+def test_call_cli_return_values(deployment, command, expect_exit_zero):
+    result = deployment(f"call {command}")
+    assert result.exit_code == 0 if expect_exit_zero else result.exit_code != 0
