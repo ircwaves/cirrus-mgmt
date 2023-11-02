@@ -7,7 +7,11 @@ import click
 from cirrus.cli.utils import click as utils_click
 from click_option_group import RequiredMutuallyExclusiveOptionGroup, optgroup
 
-from cirrus.plugins.management.deployment import WORKFLOW_POLL_INTERVAL, Deployment
+from cirrus.plugins.management.deployment import (
+    WORKFLOW_POLL_INTERVAL,
+    CalledProcessError,
+    Deployment,
+)
 from cirrus.plugins.management.utils.click import (
     additional_variables,
     silence_templating_errors,
@@ -304,7 +308,10 @@ def _call(ctx, deployment, command, include_user_vars):
     """Run an executable, in a new process, with the deployment environment vars loaded"""
     if not command:
         return
-    deployment.call(command, include_user_vars=include_user_vars)
+    try:
+        deployment.call(command, include_user_vars=include_user_vars)
+    except CalledProcessError as cpe:
+        sys.exit(cpe.returncode)
 
 
 @manage.command()

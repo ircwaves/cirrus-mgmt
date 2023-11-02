@@ -4,7 +4,7 @@ import logging
 import os
 from datetime import datetime, timezone
 from pathlib import Path
-from subprocess import check_call
+from subprocess import CalledProcessError, check_call
 from time import sleep, time
 
 import backoff
