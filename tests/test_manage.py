@@ -1,4 +1,6 @@
 import json
+import os
+from copy import deepcopy
 
 import pytest
 
@@ -21,7 +23,7 @@ def manage(invoke):
 
 
 @pytest.fixture
-def deployment_meta(queue, statedb, payloads, data):
+def deployment_meta(queue, statedb, payloads, data, workflow):
     return {
         "name": DEPLYOMENT_NAME,
         "created": "2022-11-07T04:42:26.666916+00:00",
@@ -30,7 +32,9 @@ def deployment_meta(queue, statedb, payloads, data):
         "profile": None,
         "environment": {
             "CIRRUS_STATE_DB": statedb.table_name,
-            # "CIRRUS_PUBLISH_TOPIC_ARN": ,
+            "CIRRUS_BASE_WORKFLOW_ARN": workflow["stateMachineArn"].replace(
+                "workflow1", ""
+            ),
             "CIRRUS_LOG_LEVEL": "DEBUG",
             "CIRRUS_STACK": STACK_NAME,
             "CIRRUS_DATA_BUCKET": data,
@@ -95,3 +99,17 @@ def test_manage_refresh(deployment, mock_lambda_get_conf, lambda_env):
     assert result.exit_code == 0
     new = json.loads(deployment("show").stdout)
     assert new["environment"] == lambda_env
+
+
+# @pytest.mark.parametrize("item", (
+def test_manage_get_execution_by_payload_id(deployment, basic_payloads, statedb):
+    current_env = deepcopy(os.environ)  # stash env
+    deployment.set_env()
+    basic_payloads.process()
+    pid = basic_payloads[0]["id"]
+    sfn_exe1 = deployment.get_execution_by_payload_id(pid)
+    statedb.set_aborted(pid, execution_arn=sfn_exe1["executionArn"])
+    basic_payloads.process()
+    sfn_exe2 = deployment.get_execution_by_payload_id(pid)
+    assert sfn_exe1["executionArn"] != sfn_exe2["executionArn"]
+    os.environ = current_env  # pop stash
