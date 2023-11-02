@@ -14,7 +14,7 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 - Return correct execution(`[-1]`), as new Step Function executions are
   appended to the `executions` list, from the StateDB
   Item. ([#6](https://github.com/cirrus-geo/cirrus-mgmt/pull/6))
-- enable both `call` CLI to set exit status code based of `Deployment.call`,
+- Enable both `call` CLI to set exit status code based of `Deployment.call`,
   and exception raised from `subprocess.check_call` if used as a
   library. ([#7](https://github.com/cirrus-geo/cirrus-mgmt/pull/7)
 
