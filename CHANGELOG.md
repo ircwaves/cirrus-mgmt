@@ -5,9 +5,10 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/)
 and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [v0.1.1] - 2024-02-16
 
 ### Fixed
+
 - CLI `run-workflow` dropped an `s` from `json.loads`, and the help text on the
   timout argument was
   incorrect. ([#5](https://github.com/cirrus-geo/cirrus-mgmt/pull/5))
@@ -31,6 +32,7 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 Initial release
 
-[unreleased]: https://github.com/cirrus-geo/cirrus-mgmt/compare/v0.1.0...main
+[unreleased]: https://github.com/cirrus-geo/cirrus-mgmt/compare/v0.1.1...main
+[v0.1.1]: https://github.com/cirrus-geo/cirrus-mgmt/compare/v0.1.0...v0.1.1
 [v0.1.0]: https://github.com/cirrus-geo/cirrus-mgmt/compare/v0.1.0a...v0.1.0
 [v0.1.0a]: https://github.com/cirrus-geo/cirrus-mgmt/releases/tag/v0.1.0a
